@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "exad-images"
+version = "0.1.0"
+description = "generating chatgpt images"
+authors = ["Laurent Lefebvre <laurentlefebvre8@hotmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+openai = "^1.30.2"
+requests = "^2.25.1"
+python-dotenv = "^1.0.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
