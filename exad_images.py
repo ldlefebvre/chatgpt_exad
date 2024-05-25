@@ -1,51 +1,88 @@
 import openai
 import os
-import requests
+import httpx
+import uuid
 import time
 from dotenv import load_dotenv
+import asyncio
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Set up your OpenAI API key
-openai.api_key = os.getenv('OPENAI_API_KEY')
+api_key = os.getenv('OPENAI_API_KEY')
+
+client = openai.OpenAI(api_key=api_key)
 
 # Function to generate an image based on a given term
 def generate_image(prompt):
-    response = openai.Image.create(
-        prompt=prompt,
-        n=1,  # Number of images to generate per request
-        size="1024x1024",
-        model="dall-e-3",  # Specify the model to use
-        quality="hd"  # You can also use "standard" for standard quality
-    )
-    return response['data'][0]['url']
+    try:
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            size="1024x1024",
+            quality="hd",
+            n=1
+        )
+        image_url = response.data[0].url
+        return image_url
+    except openai.APIError as e:
+        print(f"Failed to generate image: {e}")
+        return None
 
 # Function to save an image from a URL
-def save_image(image_url, save_path):
-    response = requests.get(image_url)
-    if response.status_code == 200:
-        with open(save_path, 'wb') as f:
-            f.write(response.content)
+async def save_image(image_url, save_path):
+    if image_url:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(image_url)
+            if response.status_code == 200:
+                with open(save_path, 'wb') as f:
+                    f.write(response.content)
+            else:
+                print(f"Failed to retrieve image from {image_url}")
     else:
-        print(f"Failed to retrieve image from {image_url}")
+        print("No image URL provided")
 
 # Main function to generate and save images
-def main(term, num_images, output_folder):
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+async def main(terms, num_images_per_term, output_folders):
+    images_per_minute = 5
+    request_timestamps = [0] * images_per_minute  # Initialize timestamps for rate limiting
 
-    for i in range(num_images):
-        print(f"Generating image {i+1}/{num_images} for term: {term}")
-        image_url = generate_image(term)
-        save_path = os.path.join(output_folder, f"{term.replace(' ', '_')}_{i+1}.png")
-        save_image(image_url, save_path)
-        print(f"Saved image {i+1}/{num_images} to {save_path}")
-        time.sleep(1)  # Adding a delay to avoid hitting the rate limit
+    for term, output_folder in zip(terms, output_folders):
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+
+        for i in range(num_images_per_term):
+            # Find the next available slot
+            next_available_slot = min(request_timestamps)
+            current_time = time.time()
+            sleep_time = max(60 - (current_time - next_available_slot), 0)
+
+            if sleep_time > 0:
+                print(f"Waiting for {sleep_time:.2f} seconds to respect rate limit...")
+                await asyncio.sleep(sleep_time)
+
+            print(f"Generating image {i+1}/{num_images_per_term} for term: {term}")
+            image_url = generate_image(term)
+            unique_id = uuid.uuid4()
+            save_path = os.path.join(output_folder, f"{unique_id}.png")
+            await save_image(image_url, save_path)
+            print(f"Saved image {i+1}/{num_images_per_term} to {save_path}")
+
+            # Update the timestamp for the current slot
+            request_timestamps[request_timestamps.index(next_available_slot)] = time.time()
 
 if __name__ == "__main__":
-    term = "extreme sport athlete woman doing ski touring up a huge hill, naturally good looking without makeup or body altering surgery or injection, petite face, and looking intense and fun, square aspect ratio, awesome heavenly view, view from far"  # Replace with your desired term
-    num_images = 1000  # Number of images to generate
-    output_folder = "results/ski_touring"  # Folder to save the images
+    terms = [
+        "extreme sport athlete woman doing summer mountaineering, naturally good looking and looking intense and fun, chain of mountain in the distance",
+        "extreme sport athlete woman snowmobiling, naturally good looking and looking intense and fun, chain of mountain in the distance",
+    ]
 
-    main(term, num_images, output_folder)
+    output_folders = [
+        "results/mountaineering",
+        "results/snowmobiling",
+    ]
+
+    num_images_per_term = 100
+
+    asyncio.run(main(terms, num_images_per_term, output_folders))
